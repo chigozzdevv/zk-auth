@@ -40,13 +40,20 @@ export class ZKService {
 
     const passwordBigInt = this.stringToBigInt(input.password)
     const saltBigInt = this.stringToBigInt(input.salt)
-    // The expectedHash should be the sum of password + salt (what the circuit calculates)
-    const expectedHashBigInt = passwordBigInt + saltBigInt
+    
+    // Let the circuit calculate the hash: password + salt
+    // Don't use the pre-calculated expectedHash, let the circuit do it
+    const calculatedHash = passwordBigInt + saltBigInt
+
+    console.log('ZK Service - Password BigInt:', passwordBigInt.toString())
+    console.log('ZK Service - Salt BigInt:', saltBigInt.toString())  
+    console.log('ZK Service - Calculated Hash (password + salt):', calculatedHash.toString())
+    console.log('ZK Service - Input expectedHash:', input.expectedHash)
 
     const circuitInput = {
       password: passwordBigInt.toString(),
       salt: saltBigInt.toString(),
-      expectedHash: expectedHashBigInt.toString()
+      expectedHash: calculatedHash.toString()  // Use the calculated hash
     }
 
     if (!this.wasmBuffer || !this.zkey) {
@@ -54,21 +61,24 @@ export class ZKService {
     }
 
     try {
+      console.log('Generating proof with circuit input:', circuitInput)
+      
       const { proof, publicSignals } = await snarkjs.groth16.fullProve(
         circuitInput,
         this.wasmBuffer,
         this.zkey
       )
 
+      console.log('Generated proof:', proof)
+      console.log('Generated publicSignals:', publicSignals)
+
+      // Return the proof in the exact format snarkjs expects for verification
       return {
-        proof: {
-          pi_a: proof.pi_a.slice(0, 2),
-          pi_b: [proof.pi_b[0].slice(0, 2), proof.pi_b[1].slice(0, 2)],
-          pi_c: proof.pi_c.slice(0, 2)
-        },
+        proof,
         publicSignals
       }
     } catch (error) {
+      console.error('Proof generation error details:', error)
       throw new Error(`Proof generation failed: ${error}`)
     }
   }
@@ -88,11 +98,11 @@ export class ZKService {
   }
 
   private stringToBigInt(str: string): bigint {
-    const encoder = new TextEncoder()
-    const bytes = encoder.encode(str)
+    // Use a simple hash: sum of character codes
+    // This matches what the circuit expects
     let result = BigInt(0)
-    for (let i = 0; i < bytes.length; i++) {
-      result = result * BigInt(256) + BigInt(bytes[i])
+    for (let i = 0; i < str.length; i++) {
+      result += BigInt(str.charCodeAt(i))
     }
     return result
   }

@@ -2,8 +2,8 @@ import { Router } from 'express'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import { z } from 'zod'
-import { prisma } from '../lib/db.js'
-import { ZKVerifier } from '../lib/zk.js'
+import { prisma } from '../lib/db'
+import { ZKVerifier } from '../lib/zk'
 
 const router = Router()
 const zkVerifier = ZKVerifier.getInstance()
@@ -21,6 +21,8 @@ const ZKAuthRequestSchema = z.object({
     pi_a: z.array(z.string()),
     pi_b: z.array(z.array(z.string())),
     pi_c: z.array(z.string()),
+    protocol: z.string().optional(),
+    curve: z.string().optional(),
   }),
   publicSignals: z.array(z.string()),
 })
@@ -129,6 +131,8 @@ router.post('/zk-signup', async (req, res) => {
     console.log('Salt:', salt)
     console.log('Expected hash from client:', expectedHash)
     console.log('Public signals:', publicSignals)
+    console.log('publicSignals[1] (from proof):', publicSignals[1])
+    console.log('Match?', expectedHash === publicSignals[1])
     
     // Debug: Try to extract the password from the proof input to compare hashes
     // Note: This is just for debugging - in production the password should never be logged
@@ -146,15 +150,6 @@ router.post('/zk-signup', async (req, res) => {
       })
     }
 
-    const verified = await zkVerifier.verifyProof({ proof, publicSignals })
-
-    if (!verified) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid proof'
-      })
-    }
-
     // According to Circom docs: publicSignals = [outputs, public inputs]
     // publicSignals[0] = out (circuit output: 1 if valid, 0 if not)  
     // publicSignals[1] = expectedHash (public input)
@@ -163,11 +158,46 @@ router.post('/zk-signup', async (req, res) => {
     if (publicSignals[0] !== '1') {
       return res.status(401).json({
         success: false,
-        message: 'Proof verification failed'
+        message: 'Proof verification failed - circuit output is not 1'
       })
     }
     
-    // For signup: store whatever hash the client proved they can generate
+    // Check if the expected hash matches what's in the proof
+    if (expectedHash !== publicSignals[1]) {
+      console.error('Hash mismatch! Client expected:', expectedHash, 'Proof has:', publicSignals[1])
+      return res.status(401).json({
+        success: false,
+        message: 'Hash mismatch between client and proof'
+      })
+    }
+    
+    console.log('=== PROOF STRUCTURE DEBUG ===')
+    console.log('Proof keys:', Object.keys(proof))
+    console.log('Proof.pi_a type:', typeof proof.pi_a, Array.isArray(proof.pi_a))
+    console.log('Proof.pi_a length:', proof.pi_a?.length)
+    console.log('Proof.pi_a[0] type:', typeof proof.pi_a?.[0])
+
+    // Ensure the proof has the required fields for snarkjs
+    const fullProof = {
+      pi_a: proof.pi_a,
+      pi_b: proof.pi_b,
+      pi_c: proof.pi_c,
+      protocol: proof.protocol || "groth16",
+      curve: proof.curve || "bn128"
+    }
+
+    console.log('Full proof with protocol/curve:', Object.keys(fullProof))
+
+    const verified = await zkVerifier.verifyProof({ proof: fullProof, publicSignals })
+
+    if (!verified) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid proof'
+      })
+    }
+
+    // For signup: use the hash from the proof's public signals (what was actually proven)
     const actualHash = publicSignals[1]
 
     const user = await prisma.zKUser.create({
@@ -229,7 +259,16 @@ router.post('/zk-login', async (req, res) => {
       })
     }
 
-    const verified = await zkVerifier.verifyProof({ proof, publicSignals })
+    // Ensure the proof has the required fields for snarkjs
+    const fullProof = {
+      pi_a: proof.pi_a,
+      pi_b: proof.pi_b,
+      pi_c: proof.pi_c,
+      protocol: proof.protocol || "groth16",
+      curve: proof.curve || "bn128"
+    }
+
+    const verified = await zkVerifier.verifyProof({ proof: fullProof, publicSignals })
 
     if (!verified) {
       return res.status(401).json({

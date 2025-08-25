@@ -46,10 +46,11 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onDebugData, onLoading }) =>
         let expectedHash: string
 
         if (mode === 'signup') {
-          // Generate new salt and hash for signup
+          // Generate new salt for signup
           salt = zkService.generateSalt()
-          // Generate a temporary hash for proof generation (will be corrected by the circuit)
-          expectedHash = await zkService.hashPassword(password, salt)
+          // For signup, we don't need to pre-calculate the hash
+          // The circuit will calculate it as password + salt
+          expectedHash = '' // Will be set by the circuit
           
           const { proof, publicSignals } = await zkService.generateProof({
             password,
@@ -57,15 +58,14 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onDebugData, onLoading }) =>
             expectedHash
           })
 
-          // Use the actual hash from the proof (publicSignals[1]) for consistency
-          const actualHash = publicSignals[1]
+          console.log('Proof publicSignals:', publicSignals)
 
           requestData = {
             email,
             proof,
             publicSignals,
             salt,
-            expectedHash: actualHash
+            expectedHash: publicSignals[1] // Use the hash from the proof
           }
           
           response = await ApiService.zkSignup(requestData)
