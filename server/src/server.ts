@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 8000
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? process.env.FRONTEND_URL 
-    : 'http://localhost:3000',
+    : 'https://zk-auth-cis.vercel.app',
   credentials: true
 }))
 
